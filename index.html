@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Generador de Retratos de Fase 2D</title>
+  <!-- Librerías matemáticas y de graficación -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.1/math.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; color: var(--accent); }
+    .container {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      flex: 1;
+    }
+    @media (max-width: 850px) {
+      .container { grid-template-columns: 1fr; }
+    }
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      overflow-y: auto;
+    }
+    .group { display: flex; flex-direction: column; gap: 0.35rem; }
+    label { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+    input, select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.55rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-family: monospace;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    button {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 0.7rem;
+      border-radius: 6px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: var(--accent-hover); color: white; }
+    button.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 500;
+    }
+    button.secondary:hover { background: var(--border); }
+    .presets { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .presets button { font-size: 0.75rem; padding: 0.35rem 0.6rem; }
+    .equilibria-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .eq-item { margin-bottom: 0.6rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+    .eq-item:last-child { border-bottom: none; margin-bottom: 0; }
+    .main-view {
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      position: relative;
+    }
+    #plot { width: 100%; height: 100%; min-height: 550px; border-radius: 8px; overflow: hidden; }
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 0.5rem;
+    }
+    .error-msg { color: #f87171; font-size: 0.85rem; display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌀 Analizador de Retratos de Fase 2D</h1>
+  <span style="font-size: 0.85rem; color: var(--muted);">Sistemas Autónomos: dx/dt = f(x,y), dy/dt = g(x,y)</span>
+</header>
+
+<div class="container">
+  <aside class="sidebar">
+    <div class="group">
+      <label>Ejemplos rápidos:</label>
+      <div class="presets">
+        <button class="secondary" onclick="loadPreset('pendulum')">Péndulo</button>
+        <button class="secondary" onclick="loadPreset('lotka')">Depredador-Presa</button>
+        <button class="secondary" onclick="loadPreset('vanderpol')">Van der Pol</button>
+        <button class="secondary" onclick="loadPreset('saddle')">Punto Silla</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label for="dxInput">dx/dt = f(x, y)</label>
+      <input id="dxInput" type="text" value="y" placeholder="Ej: y" />
+    </div>
+
+    <div class="group">
+      <label for="dyInput">dy/dt = g(x, y)</label>
+      <input id="dyInput" type="text" value="-sin(x) - 0.3*y" placeholder="Ej: -sin(x) - 0.3*y" />
+    </div>
+
+    <div class="row">
+      <div class="group">
+        <label>X mín / máx</label>
+        <div class="row">
+          <input id="xmin" type="number" value="-6" step="1" />
+          <input id="xmax" type="number" value="6" step="1" />
+        </div>
+      </div>
+      <div class="group">
+        <label>Y mín / máx</label>
+        <div class="row">
+          <input id="ymin" type="number" value="-4" step="1" />
+          <input id="ymax" type="number" value="4" step="1" />
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="group">
+        <label for="density">Densidad flechas</label>
+        <input id="density" type="number" value="22" min="10" max="40" />
+      </div>
+      <div class="group">
+        <label for="tmax">Tiempo integración</label>
+        <input id="tmax" type="number" value="15" min="2" max="100" />
+      </div>
+    </div>
+
+    <div id="errorBox" class="error-msg"></div>
+
+    <button onclick="renderAll()">Generar Retrato de Fase</button>
+    <button class="secondary" onclick="clearCustomTrajectories()">Limpiar trayectorias manuales</button>
+
+    <div class="group">
+      <label>Puntos de Equilibrio y Estabilidad:</label>
+      <div id="equilibriaList" class="equilibria-box">Calculando...</div>
+    </div>
+  </aside>
+
+  <main class="main-view">
+    <div id="plot"></div>
+    <div class="hint">💡 <b>Tip:</b> Haz clic izquierdo en cualquier punto del plano para trazar una trayectoria desde esa condición inicial.</div>
+  </main>
+</div>
+
+<script>
+  let compiledF, compiledG;
+  let customSeeds = [];
+
+  const presets = {
+    pendulum: { dx: "y", dy: "-sin(x) - 0.3*y", xmin: -6, xmax: 6, ymin: -4, ymax: 4, tmax: 15 },
+    lotka:    { dx: "1.1*x - 0.4*x*y", dy: "0.1*x*y - 0.4*y", xmin: -0.5, xmax: 10, ymin: -0.5, ymax: 8, tmax: 20 },
+    vanderpol:{ dx: "y", dy: "1.5*(1 - x^2)*y - x", xmin: -4, xmax: 4, ymin: -4, ymax: 4, tmax: 20 },
+    saddle:   { dx: "x - y^2", dy: "-y + 0.5*x^2", xmin: -3, xmax: 3, ymin: -3, ymax: 3, tmax: 8 }
+  };
+
+  function loadPreset(name) {
+    const p = presets[name];
+    document.getElementById("dxInput").value = p.dx;
+    document.getElementById("dyInput").value = p.dy;
+    document.getElementById("xmin").value = p.xmin;
+    document.getElementById("xmax").value = p.xmax;
+    document.getElementById("ymin").value = p.ymin;
+    document.getElementById("ymax").value = p.ymax;
+    document.getElementById("tmax").value = p.tmax;
+    customSeeds = [];
+    renderAll();
+  }
+
+  function clearCustomTrajectories() {
+    customSeeds = [];
+    renderAll();
+  }
+
+  function f(x, y) { return compiledF.evaluate({ x, y }); }
+  function g(x, y) { return compiledG.evaluate({ x, y }); }
+
+  // Integrador Runge-Kutta de 4to orden (RK4)
+  function integrateRK4(x0, y0, dt, steps, xmin, xmax, ymin, ymax) {
+    const xs = [x0], ys = [y0];
+    let x = x0, y = y0;
+    const padX = (xmax - xmin) * 0.5;
+    const padY = (ymax - ymin) * 0.5;
+
+    for (let i = 0; i < steps; i++) {
+      const k1x = f(x, y), k1y = g(x, y);
+      const k2x = f(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y);
+      const k2y = g(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y);
+      const k3x = f(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y);
+      const k3y = g(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y);
+      const k4x = f(x + dt * k3x, y + dt * k3y);
+      const k4y = g(x + dt * k3x, y + dt * k3y);
+
+      x += (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x);
+      y += (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y);
+
+      if (!isFinite(x) || !isFinite(y) ||
+          x < xmin - padX || x > xmax + padX ||
+          y < ymin - padY || y > ymax + padY) break;
+
+      xs.push(x);
+      ys.push(y);
+    }
+    return { x: xs, y: ys };
+  }
+
+  // Búsqueda de puntos de equilibrio (Método de Newton-Raphson 2D en malla)
+  function findEquilibria(xmin, xmax, ymin, ymax) {
+    const equilibria = [];
+    const grid = 8;
+    const eps = 1e-6;
+
+    for (let i = 0; i <= grid; i++) {
+      for (let j = 0; j <= grid; j++) {
+        let x = xmin + (i / grid) * (xmax - xmin);
+        let y = ymin + (j / grid) * (ymax - ymin);
+
+        for (let iter = 0; iter < 30; iter++) {
+          const fx = f(x, y), gy = g(x, y);
+          if (Math.hypot(fx, gy) < 1e-9) break;
+
+          const dfdx = (f(x + eps, y) - f(x - eps, y)) / (2 * eps);
+          const dfdy = (f(x, y + eps) - f(x, y - eps)) / (2 * eps);
+          const dgdx = (g(x + eps, y) - g(x - eps, y)) / (2 * eps);
+          const dgdy = (g(x, y + eps) - g(x, y - eps)) / (2 * eps);
+
+          const det = dfdx * dgdy - dfdy * dgdx;
+          if (Math.abs(det) < 1e-12) break;
+
+          x -= (dgdy * fx - dfdy * gy) / det;
+          y -= (-dgdx * fx + dfdx * gy) / det;
+        }
+
+        if (isFinite(x) && isFinite(y) &&
+            x >= xmin - 0.5 && x <= xmax + 0.5 &&
+            y >= ymin - 0.5 && y <= ymax + 0.5 &&
+            Math.hypot(f(x, y), g(x, y)) < 1e-6) {
+          const isDup = equilibria.some(p => Math.hypot(p.x - x, p.y - y) < 1e-3);
+          if (!isDup) equilibria.push({ x, y });
+        }
+      }
+    }
+    return equilibria;
+  }
+
+  // Clasificación mediante valores propios del Jacobiano
+  function classifyEquilibrium(x, y) {
+    const eps = 1e-6;
+    const a = (f(x + eps, y) - f(x - eps, y)) / (2 * eps);
+    const b = (f(x, y + eps) - f(x, y - eps)) / (2 * eps);
+    const c = (g(x + eps, y) - g(x - eps, y)) / (2 * eps);
+    const d = (g(x, y + eps) - g(x, y - eps)) / (2 * eps);
+
+    const tr = a + d;
+    const det = a * d - b * c;
+    const disc = tr * tr - 4 * det;
+
+    let eigStr = "", type = "";
+    if (disc >= 0) {
+      const l1 = (tr + Math.sqrt(disc)) / 2;
+      const l2 = (tr - Math.sqrt(disc)) / 2;
+      eigStr = `λ₁=${l1.toFixed(3)}, λ₂=${l2.toFixed(3)}`;
+      if (det < 0) type = "Punto Silla (Inestable)";
+      else if (tr < 0 && det > 0) type = "Nodo Estable (Sumidero)";
+      else if (tr > 0 && det > 0) type = "Nodo Inestable (Fuente)";
+      else type = "Punto Degenerado";
+    } else {
+      const re = tr / 2;
+      const im = Math.sqrt(-disc) / 2;
+      eigStr = `λ = ${re.toFixed(3)} ± ${im.toFixed(3)}i`;
+      if (Math.abs(re) < 1e-4) type = "Centro (Estabilidad Neutral)";
+      else if (re < 0) type = "Espiral Estable (Atractor)";
+      else type = "Espiral Inestable (Repulsor)";
+    }
+    return { eigStr, type };
+  }
+
+  function renderAll() {
+    const errorBox = document.getElementById("errorBox");
+    errorBox.style.display = "none";
+
+    const dxStr = document.getElementById("dxInput").value;
+    const dyStr = document.getElementById("dyInput").value;
+    const xmin = parseFloat(document.getElementById("xmin").value);
+    const xmax = parseFloat(document.getElementById("xmax").value);
+    const ymin = parseFloat(document.getElementById("ymin").value);
+    const ymax = parseFloat(document.getElementById("ymax").value);
+    const density = parseInt(document.getElementById("density").value);
+    const tmax = parseFloat(document.getElementById("tmax").value);
+
+    try {
+      compiledF = math.compile(dxStr);
+      compiledG = math.compile(dyStr);
+      // Prueba rápida de evaluación
+      f(0.1, 0.1); g(0.1, 0.1);
+    } catch (err) {
+      errorBox.textContent = "Error de sintaxis en la ecuación: " + err.message;
+      errorBox.style.display = "block";
+      return;
+    }
+
+    const traces = [];
+
+    // 1. Campo vectorial (segmentos + puntas de flecha)
+    const arrowX = [], arrowY = [], headX = [], headY = [];
+    const scaleX = (xmax - xmin) / density * 0.65;
+    const scaleY = (ymax - ymin) / density * 0.65;
+
+    for (let i = 0; i <= density; i++) {
+      for (let j = 0; j <= density; j++) {
+        const x = xmin + (i / density) * (xmax - xmin);
+        const y = ymin + (j / density) * (ymax - ymin);
+        const vx = f(x, y), vy = g(x, y);
+        const mag = Math.hypot(vx, vy);
+        if (mag > 1e-10 && isFinite(mag)) {
+          const nx = (vx / mag) * scaleX;
+          const ny = (vy / mag) * scaleY;
+          arrowX.push(x - nx * 0.4, x + nx * 0.4, null);
+          arrowY.push(y - ny * 0.4, y + ny * 0.4, null);
+          headX.push(x + nx * 0.4);
+          headY.push(y + ny * 0.4);
+        }
+      }
+    }
+
+    traces.push({
+      x: arrowX, y: arrowY, mode: "lines",
+      line: { color: "rgba(56, 189, 248, 0.45)", width: 1.3 },
+      name: "Campo vectorial", hoverinfo: "skip"
+    });
+    traces.push({
+      x: headX, y: headY, mode: "markers",
+      marker: { color: "rgba(56, 189, 248, 0.7)", size: 3.5 },
+      showlegend: false, hoverinfo: "skip"
+    });
+
+    // 2. Isoclinas nulas (Contornos en nivel 0)
+    const nGrid = 90;
+    const xGrid = Array.from({ length: nGrid }, (_, i) => xmin + (i / (nGrid - 1)) * (xmax - xmin));
+    const yGrid = Array.from({ length: nGrid }, (_, j) => ymin + (j / (nGrid - 1)) * (ymax - ymin));
+    const zF = [], zG = [];
+    for (let j = 0; j < nGrid; j++) {
+      const rowF = [], rowG = [];
+      for (let i = 0; i < nGrid; i++) {
+        rowF.push(f(xGrid[i], yGrid[j]));
+        rowG.push(g(xGrid[i], yGrid[j]));
+      }
+      zF.push(rowF);
+      zG.push(rowG);
+    }
+
+    traces.push({
+      x: xGrid, y: yGrid, z: zF, type: "contour",
+      contours: { start: 0, end: 0, size: 1, coloring: "none" },
+      line: { color: "#f43f5e", width: 2, dash: "dash" },
+      showscale: false, name: "Isoclina dx/dt = 0", hoverinfo: "skip"
+    });
+    traces.push({
+      x: xGrid, y: yGrid, z: zG, type: "contour",
+      contours: { start: 0, end: 0, size: 1, coloring: "none" },
+      line: { color: "#a855f7", width: 2, dash: "dash" },
+      showscale: false, name: "Isoclina dy/dt = 0", hoverinfo: "skip"
+    });
+
+    // 3. Trayectorias (automáticas + seleccionadas por clic)
+    const defaultSeeds = [];
+    for (let i = 1; i <= 3; i++) {
+      for (let j = 1; j <= 3; j++) {
+        defaultSeeds.push([
+          xmin + (i / 4) * (xmax - xmin),
+          ymin + (j / 4) * (ymax - ymin)
+        ]);
+      }
+    }
+    const allSeeds = [...defaultSeeds, ...customSeeds];
+    const dt = 0.02;
+    const steps = Math.floor(tmax / dt);
+
+    allSeeds.forEach((seed, idx) => {
+      const fwd = integrateRK4(seed[0], seed[1], dt, steps, xmin, xmax, ymin, ymax);
+      const bwd = integrateRK4(seed[0], seed[1], -dt, Math.floor(steps / 2), xmin, xmax, ymin, ymax);
+      traces.push({
+        x: fwd.x, y: fwd.y, mode: "lines",
+        line: { color: "#f8fafc", width: 1.6 },
+        name: "Trayectorias", showlegend: idx === 0, legendgroup: "traj", hoverinfo: "skip"
+      });
+      traces.push({
+        x: bwd.x, y: bwd.y, mode: "lines",
+        line: { color: "rgba(248, 250, 252, 0.35)", width: 1.2 },
+        showlegend: false, legendgroup: "traj", hoverinfo: "skip"
+      });
+    });
+
+    // 4. Puntos de equilibrio
+    const equilibria = findEquilibria(xmin, xmax, ymin, ymax);
+    const eqListDiv = document.getElementById("equilibriaList");
+    if (equilibria.length === 0) {
+      eqListDiv.innerHTML = "<span style='color:var(--muted)'>No se detectaron puntos de equilibrio en esta región.</span>";
+    } else {
+      eqListDiv.innerHTML = equilibria.map((eq, i) => {
+        const info = classifyEquilibrium(eq.x, eq.y);
+        return `<div class="eq-item">
+          <b>P${i + 1}: (${eq.x.toFixed(3)}, ${eq.y.toFixed(3)})</b><br/>
+          <span style="color:var(--accent)">${info.type}</span><br/>
+          <span style="color:var(--muted)">${info.eigStr}</span>
+        </div>`;
+      }).join("");
+
+      traces.push({
+        x: equilibria.map(p => p.x),
+        y: equilibria.map(p => p.y),
+        mode: "markers",
+        marker: { color: "#ef4444", size: 10, line: { color: "#ffffff", width: 1.5 } },
+        name: "Equilibrio",
+        text: equilibria.map((p, i) => `P${i + 1} (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`),
+        hoverinfo: "text"
+      });
+    }
+
+    const layout = {
+      paper_bgcolor: "#1e293b",
+      plot_bgcolor: "#0f172a",
+      font: { color: "#f8fafc" },
+      margin: { t: 40, r: 20, b: 45, l: 50 },
+      xaxis: { range: [xmin, xmax], title: "x", gridcolor: "#1e293b", zerolinecolor: "#475569" },
+      yaxis: { range: [ymin, ymax], title: "y", gridcolor: "#1e293b", zerolinecolor: "#475569" },
+      legend: { orientation: "h", y: 1.08 }
+    };
+
+    Plotly.newPlot("plot", traces, layout, { responsive: true }).then(gd => {
+      gd.on("plotly_click", data => {
+        if (data.points && data.points.length > 0) {
+          customSeeds.push([data.points[0].x, data.points[0].y]);
+          renderAll();
+        }
+      });
+    });
+  }
+
+  // Inicializar al cargar
+  window.onload = renderAll;
+</script>
+</body>
+</html>
